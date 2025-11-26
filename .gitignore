@@ -117,3 +117,4 @@ venv.bak/
 .DS_Store
 Thumbs.db
 *.pyc
+batch_runs/

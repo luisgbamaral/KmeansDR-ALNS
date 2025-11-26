@@ -11,17 +11,14 @@ from rl.environments.cvrp_AlnsEnv_LSA1 import cvrpAlnsEnv_LSA1
 
 # --- CONFIGURAÇÃO DE CAMINHOS E CONSTANTES ---
 
-# Diretório onde este script está (src/routing/cvrp)
-SCRIPT_DIR = Path(__file__).resolve().parent
-
-# Diretório base 'src' (dois níveis acima)
-BASE_PATH = SCRIPT_DIR.parents[1]
+# Diretório onde este script está (src/)
+BASE_PATH = Path(__file__).resolve().parent
 
 # Onde salvar os resultados (na raiz do projeto, fora de src)
-RESULTS_ROOT = SCRIPT_DIR.parents[2] / "batch_runs/"
+RESULTS_ROOT = BASE_PATH.parents[1] / "batch_runs/"
 
 # Arquivo de configuração base
-PARAMETERS_FILE = SCRIPT_DIR / "configs/drl_alns_cvrp_debug.json"
+PARAMETERS_FILE = BASE_PATH / "routing/cvrp/configs/drl_alns_cvrp_debug.json"
 
 # --- CONFIGURAÇÃO DA BATERIA DE TESTES ---
 NUM_INSTANCES = 5000        # Quantas instâncias rodar (0 a 4999)
