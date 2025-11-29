@@ -1,5 +1,4 @@
 import os
-import csv
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -7,139 +6,128 @@ from pathlib import Path
 from stable_baselines3 import PPO
 from tqdm import tqdm
 
-# --- AJUSTE 1: Importação direta (sem 'src.') ---
-# Como o arquivo está em code/src/, importamos direto de rl.environments
+# Importação direta (pois o script está na pasta src)
 from rl.environments.ai4tsp_AlnsEnv_LSA1 import ai4tspAlnsEnv_LSA1
 
-# --- CONFIGURAÇÕES DO PAPER ---
-# --- AJUSTE 2: Caminhos relativos a partir de 'src' ---
+# --- CONFIGURAÇÕES DE TESTE (PAPER) ---
+# Iterações aumentam para 200 no caso de 100 nós
 EXPERIMENT_CONFIGS = {
-    20: {
-        "iterations": 100,
-        "model_path": "rl/trained_models/rl/ai4tspAlnsEnv_LSA1/models/DR-ALNS_ai4tsp_20/model",
-    },
-    50: {
-        "iterations": 100,
-        "model_path": "rl/trained_models/rl/ai4tspAlnsEnv_LSA1/models/DR-ALNS_ai4tsp_50/model",
-    },
-    100: {
-        "iterations": 200,
-        "model_path": "rl/trained_models/rl/ai4tspAlnsEnv_LSA1/models/DR-ALNS_ai4tsp_100/model",
-    },
+    20:  {'iterations': 100, 'model_path': 'rl/trained_models/ai4tspAlnsEnv_LSA1/models/DR-ALNS_20/model'},
+    50:  {'iterations': 100, 'model_path': 'rl/trained_models/ai4tspAlnsEnv_LSA1/models/DR-ALNS_50/model'},
+    100: {'iterations': 200, 'model_path': 'rl/trained_models/ai4tspAlnsEnv_LSA1/models/DR-ALNS_100/model'}
 }
 
-# --- AJUSTE 3: Caminho base é o diretório atual ---
 BASE_PATH = Path(__file__).resolve().parent
-INSTANCES_DIR = Path("orienteering/ai4tsp/data/test/instances")
-print(f"Caminho das instâncias: {INSTANCES_DIR}")
-
+INSTANCES_DIR = BASE_PATH / 'routing/orienteering/ai4tsp/data/test/instances'
 
 def get_test_instances(size):
-    """Filtra as instâncias pelo tamanho"""
-    all_files = sorted([f.stem for f in INSTANCES_DIR.glob("*.csv")])
-
-    # Tenta filtrar pelo padrão de nome (ex: instance_20_...)
-    filtered = [f for f in all_files if f"_{size}_" in f]
-
+    """Mesma lógica do treino, mas agora para teste"""
+    all_files = sorted([f.stem for f in INSTANCES_DIR.glob('*.csv')])
+    filtered = [f for f in all_files if f'_{size}_' in f]
+    
+    # Fallback se nomes não tiverem padrão
     if not filtered:
-        print(
-            f"Aviso: Não achei padrão de nome para tamanho {size}. Usando as primeiras 250."
-        )
         return all_files[:250]
-
     return filtered[:250]
 
-
 def evaluate_size(n_nodes, config):
-    print(f"\n--- Avaliando Tamanho: {n_nodes} (Iterações: {config['iterations']}) ---")
-
-    model_path = config["model_path"]
+    print(f"\n>>> Avaliando {n_nodes} Nós ({config['iterations']} iterações) <<<")
+    
+    model_path = config['model_path']
     if not os.path.exists(model_path + ".zip"):
-        print(
-            f"Erro: Modelo não encontrado em {model_path}.zip. Verifique se treinou este tamanho."
-        )
+        print(f"ERRO CRÍTICO: Modelo não encontrado em {model_path}")
+        print("Certifique-se de ter rodado 'train_paper_models.py' primeiro.")
         return None
-
+        
+    # Carrega modelo treinado
     model = PPO.load(model_path)
-
     instances = get_test_instances(n_nodes)
-    print(len(instances), "instâncias carregadas para avaliação.")
+    
+    # Configura ambiente
     env_config = {
-        "environment": {"iterations": config["iterations"], "instances": instances}
+        'environment': {
+            'iterations': config['iterations'],
+            'instances': instances
+        }
     }
-
-    # Instancia o ambiente (já com Cluster/Elbow automático no reset)
     env = ai4tspAlnsEnv_LSA1(env_config)
-
+    
     results = []
-
-    for instance_name in tqdm(instances, desc=f"Simulando {n_nodes} nós"):
+    
+    for instance_name in tqdm(instances, desc=f"Simulando {n_nodes}"):
         env.instances = [instance_name]
+        
+        # O reset recalcula o K-Elbow para esta instância específica
         state, _ = env.reset()
-
+        
         done = False
         while not done:
+            # Deterministic=True é padrão para avaliação final
             action, _ = model.predict(state, deterministic=True)
-            state, reward, done, _, _ = env.step(action)
-
-        best_score = env.best_solution.objective()
-        real_score = abs(best_score)
-
-        results.append(
-            {
-                "instance": instance_name,
-                "size": n_nodes,
-                "best_score": real_score,
-                "iterations": env.iteration,
-            }
-        )
-
+            state, _, done, _, _ = env.step(action)
+            
+        # O ambiente retorna reward negativo (custo).
+        # Convertemos para positivo (Prêmio Coletado) para o gráfico.
+        final_score = abs(env.best_solution.objective())
+        
+        results.append({
+            'size': n_nodes,
+            'instance': instance_name,
+            'score': final_score
+        })
+        
     return pd.DataFrame(results)
 
+def plot_and_save(all_results_df):
+    if all_results_df.empty: return
 
-def plot_results(all_results_df):
-    if all_results_df.empty:
-        return
-
-    summary = (
-        all_results_df.groupby("size")["best_score"].agg(["mean", "std"]).reset_index()
-    )
-
-    print("\n=== RESUMO DOS RESULTADOS (Tabela 3 Replica) ===")
+    # Resumo estatístico
+    summary = all_results_df.groupby('size')['score'].agg(['mean', 'std', 'max']).reset_index()
+    print("\n=== RESULTADOS FINAIS DA REPLICAÇÃO ===")
     print(summary)
+    
+    # Salvar dados
+    all_results_df.to_csv("results_full_clustering.csv", index=False)
+    summary.to_csv("results_summary_clustering.csv", index=False)
 
-    all_results_df.to_csv("replication_results_full.csv", index=False)
-    summary.to_csv("replication_results_summary.csv", index=False)
-
+    # Plotagem
+    sizes = summary['size'].astype(str)
+    means = summary['mean']
+    stds = summary['std']
+    
     plt.figure(figsize=(10, 6))
-    plt.bar(
-        summary["size"].astype(str),
-        summary["mean"],
-        yerr=summary["std"],
-        capsize=5,
-        color="skyblue",
-        alpha=0.7,
-    )
-    plt.xlabel("Tamanho da Instância (Nós)")
-    plt.ylabel("Média do Melhor Score (Prêmio)")
-    plt.title("Performance do DR-ALNS com Clustering")
-    plt.grid(axis="y", linestyle="--", alpha=0.7)
+    
+    # Barras principais
+    bars = plt.bar(sizes, means, yerr=stds, capsize=10, color='#3498db', alpha=0.9, label='Nossa Abordagem (Cluster)')
+    
+    # Linhas de referência do Paper (Valores aproximados da Tabela 3)
+    paper_means = {'20': 5.63, '50': 8.44, '100': 11.75}
+    
+    for i, size in enumerate(sizes):
+        val = means[i]
+        plt.text(i, val + 0.3, f"{val:.2f}", ha='center', color='black', fontweight='bold')
+        
+        # Adiciona linha vermelha do paper para comparação
+        ref = paper_means.get(size, 0)
+        plt.hlines(ref, i-0.4, i+0.4, colors='red', linestyles='dashed', linewidth=2)
+        plt.text(i, ref + 0.5, f"Paper: {ref}", ha='center', color='red', fontsize=9, fontweight='bold')
 
-    for i, v in enumerate(summary["mean"]):
-        plt.text(i, v + 0.5, f"{v:.2f}", ha="center", fontweight="bold")
-
-    plt.savefig("replication_performance_plot.png")
-    print("\nGráfico salvo em 'replication_performance_plot.png'")
-
+    plt.xlabel('Tamanho da Instância (Nós)')
+    plt.ylabel('Prêmio Total Coletado')
+    plt.title('Comparação: DR-ALNS Original vs. DR-ALNS com Clustering')
+    plt.legend()
+    plt.grid(axis='y', alpha=0.3)
+    
+    plt.savefig("clustering_performance_plot.png")
+    print("\nGráfico salvo em: clustering_performance_plot.png")
 
 if __name__ == "__main__":
-    all_data = []
-    # Avalia os 3 tamanhos sequencialmente
+    dfs = []
+    # Avalia na ordem
     for size in [20, 50, 100]:
         df = evaluate_size(size, EXPERIMENT_CONFIGS[size])
-        if df is not None:
-            all_data.append(df)
-
-    if all_data:
-        full_df = pd.concat(all_data)
-        plot_results(full_df)
+        if df is not None: dfs.append(df)
+    
+    if dfs:
+        full_df = pd.concat(dfs)
+        plot_and_save(full_df)
